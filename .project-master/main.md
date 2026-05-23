@@ -2,11 +2,16 @@
 
 ## Project Overview
 
-TBD. 프로젝트의 목적과 범위를 기록합니다.
+Project Master는 repo-local Markdown 기록과 검증 가능한 CLI를 통해 agent가
+프로젝트 목적, PRD, 요구사항, 결정, session, 다음 작업을 장기간 이어받게
+하는 프로젝트 메모리 시스템이다.
 
 ## Current Focus
 
-TBD. 현재 가장 중요한 작업을 기록합니다.
+Hermes skill이 의존할 operational contract와 lifecycle 불변식 검증이
+완료되었다. 다음 단계는 `context brief`, `session finish`, managed
+requirement 및 current-state 명령을 사용하는 `project-master` skill을
+작성하는 것이다.
 
 ## Active PRDs
 

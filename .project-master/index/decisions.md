@@ -27,3 +27,42 @@
 - Supersedes:
 - Superseded by:
 <!-- PM:decision:D-002:end -->
+
+<!-- PM:decision:D-003:start -->
+## D-003: Complete the skill-facing CLI contract before authoring the skill
+
+- Status: active
+- Source Session: S-003
+- Date: 2026-05-23
+- Rationale: A skill should teach durable executable commands rather than preserve avoidable manual gaps
+- Decision: Complete the skill-facing CLI contract before authoring the skill
+- Source Detail: User goal to optimize the repository before freezing it behind a skill
+- Supersedes:
+- Superseded by:
+<!-- PM:decision:D-003:end -->
+
+<!-- PM:decision:D-004:start -->
+## D-004: Track managed requirements as project-global IDs inside PRDs
+
+- Status: active
+- Source Session: S-003
+- Date: 2026-05-23
+- Rationale: Requirements need provenance and status history while authored PRD narrative remains editable; authored legacy IDs remain reserved
+- Decision: Track managed requirements as project-global IDs inside PRDs
+- Source Detail: Skill-ready operational contract implementation
+- Supersedes:
+- Superseded by:
+<!-- PM:decision:D-004:end -->
+
+<!-- PM:decision:D-005:start -->
+## D-005: Closed sessions reject new source events while finish remains idempotent
+
+- Status: active
+- Source Session: S-004
+- Date: 2026-05-24
+- Rationale: A closed session is a durable handoff snapshot, but deterministic re-materialization of its summary and indexes must remain safe
+- Decision: Closed sessions reject new source events while finish remains idempotent
+- Source Detail: Final operational contract review
+- Supersedes:
+- Superseded by:
+<!-- PM:decision:D-005:end -->

@@ -16,9 +16,14 @@ from pathlib import Path
 PROJECT_DIR = ".project-master"
 SESSION_RE = re.compile(r"^S-(\d{3,})$")
 PRD_RE = re.compile(r"^P-(\d{3,})$")
+REQUIREMENT_RE = re.compile(r"^R-(\d{3,})$")
 PRD_FILE_RE = re.compile(r"^(P-\d{3,})(?:-[^/]+)?\.md$")
 ID_RE_TEMPLATE = r"\b{prefix}-(\d{{3,}})\b"
 PRD_STATUSES = ("backlog", "active", "done", "cancelled")
+REQUIREMENT_STATUSES = ("proposed", "accepted", "implemented", "deferred", "removed", "rolled_back")
+DECISION_STATUSES = ("active", "superseded", "rejected")
+ACTION_STATUSES = ("pending", "in_progress", "done", "cancelled")
+QUESTION_STATUSES = ("open", "resolved", "deferred")
 PRD_FIELD_ORDER = (
     "PRD ID",
     "Title",
@@ -37,6 +42,16 @@ PRD_RELATIONS = {
     "decision": ("Related Decisions", "D", "decision"),
     "action": ("Related Actions", "A", "action"),
 }
+REQUIREMENT_FIELD_ORDER = (
+    "Requirement ID",
+    "PRD",
+    "Text",
+    "Status",
+    "Created",
+    "Updated",
+    "Last Source Session",
+    "Last Source Turn",
+)
 
 DIRECTORIES = (
     "index",
@@ -90,47 +105,47 @@ TBD. 현재 가장 중요한 작업을 기록합니다.
 
 ## Core Rules
 
-1. 프로젝트 수준의 제안 전에 `main.md`와 관련 `index/*.md`를 확인합니다.
+1. 프로젝트 수준의 제안 전에 `./pm context brief`를 실행하고 필요 시 source 문서를 확인합니다.
 2. 가능한 경우 수동 편집보다 `pm` CLI를 사용합니다.
 3. 중요한 사용자 의도는 session의 `turns.md`에 기록합니다.
 4. 결정은 session에 기록하고 `index/decisions.md`로 반영합니다.
 5. next action은 session에 기록하고 `index/next-actions.md`로 반영합니다.
-6. session 종료 시 summary를 작성하고 indexes를 갱신합니다.
+6. session 종료 시 `./pm session finish`로 의미 summary, indexes, validation을 함께 반영합니다.
 7. raw conversation과 해석된 summary를 분리합니다.
 8. 큰 raw log를 global index에 복제하지 않습니다.
 9. 간결하고 신호가 높은 기록을 선호합니다.
 10. 대체된 결정은 삭제하지 않고 `superseded` 상태로 남깁니다.
 11. 요구사항 대화가 발생하면 관련 PRD를 찾거나 `./pm prd new`로 생성합니다.
-12. 중요한 요구사항 변화에는 source session/turn 및 관련 decision/action 링크를 남깁니다.
+12. 중요한 요구사항 변화는 `./pm requirement add/status`로 source session/turn과 상태 history를 남깁니다.
+13. action, question, 대체된 decision의 현재 상태는 해당 `status` 명령으로 갱신합니다.
+14. closed session에는 새 raw/turn/decision/action/question event를 추가하지 않습니다.
 
 ## Session Workflow
 
 ### Start Of Work
 
-1. `.project-master/main.md`를 읽습니다.
-2. 관련 index 파일(`decisions.md`, `next-actions.md`, `open-questions.md`, `prd-map.md`)을 읽습니다.
-3. `./pm status`를 실행합니다.
-4. 필요하면 `./pm session new`를 실행합니다.
+1. `./pm context brief`를 실행합니다.
+2. 필요한 근거가 있으면 관련 PRD, index 또는 최근 session 원문을 읽습니다.
+3. 새 작업을 추적해야 하면 `./pm session new`를 실행합니다.
 
 ### During Work
 
 1. 의미 있는 raw context가 있으면 `./pm raw append`로 추가합니다.
 2. 중요한 turn은 `./pm turn add`로 기록합니다.
-3. 결정, action, question이 발생하면 해당 명령으로 기록합니다.
-4. PRD에 영향을 주는 변화는 `./pm prd link` 및 필요 시 `./pm prd status`로 반영합니다.
+3. 결정, action, question이 발생하거나 상태가 변하면 해당 명령으로 기록합니다.
+4. PRD에 영향을 주는 변화는 `./pm prd link`, `./pm prd status`, `./pm requirement add/status`로 반영합니다.
 
 ### End Of Work
 
-1. session의 `summary.md`에 의미 있는 요약을 작성합니다.
-2. `./pm session close S-xxx`를 실행합니다.
-3. `./pm index update --session S-xxx`를 실행합니다.
-4. `./pm check`를 실행합니다.
+1. agent가 one-line summary, flow, user intent, next action을 작성합니다.
+2. `./pm session finish S-xxx --one-line "..." --flow "..." --intent "..." --next "..."`를 실행합니다.
+3. 필요하면 `./pm context brief`로 handoff 상태를 확인합니다.
 """,
     "README.md": """# Project Master
 
 ## Overview
 
-Project Master는 대화, 결정, next action, PRD, session 결과를 Markdown으로 보존하는 파일 기반 프로젝트 메모리입니다. `.project-master/sessions/`는 session별 원본 기록이고, `.project-master/index/`는 프로젝트 전체의 현재 상태를 모아 보여 줍니다.
+Project Master는 대화, 결정, next action, PRD, requirement, session 결과를 Markdown으로 보존하는 파일 기반 프로젝트 메모리입니다. `.project-master/sessions/`는 session별 원본 기록이고, `.project-master/index/`는 프로젝트 전체의 현재 상태를 모아 보여 줍니다.
 
 ## Initialize
 
@@ -145,9 +160,10 @@ Project Master는 대화, 결정, next action, PRD, session 결과를 Markdown�
 
 ## Daily Agent Workflow
 
-작업을 시작할 때 `main.md`와 필요한 `index/*.md`를 읽고 `./pm status`를 실행합니다. 새 대화를 추적해야 하면 session을 생성합니다.
+작업을 시작할 때는 저장된 현재 상태를 집계하는 brief를 먼저 읽습니다. 상세 근거가 필요하면 `main.md`, `index/*.md`, 최근 session 또는 활성 PRD를 추가로 확인합니다.
 
 ```bash
+./pm context brief
 ./pm session new
 ./pm raw append --session S-001 --role user --content "요청 내용"
 ./pm turn add --session S-001 --prompt "요청" --content "다룬 범위" --intent "사용자 의도" --response "응답 요약" --result "변경 결과"
@@ -155,21 +171,28 @@ Project Master는 대화, 결정, next action, PRD, session 결과를 Markdown�
 
 ## Session Lifecycle
 
-결정, action, question은 발생하는 즉시 기록합니다.
+결정, action, question은 발생하는 즉시 기록하고, 상태가 변하면 CLI로 갱신합니다.
 
 ```bash
 ./pm decision add --session S-001 --title "파일 기반 기록 사용" --status active --rationale "git에서 검토 가능" --source "사용자 요구"
 ./pm action add --session S-001 --text "CLI 검증 실행" --status pending --owner "agent"
 ./pm question add --session S-001 --text "배포 시 설치 경로는 무엇인가?" --status open
+./pm decision status D-001 --status superseded --by D-002
+./pm action status A-001 --status done
+./pm question status Q-001 --status resolved
 ```
 
-session 종료 전 `sessions/S-xxx/summary.md`의 `TBD`를 실제 의미 요약으로 교체합니다. CLI는 의미를 추측해 작성하지 않습니다.
+session 종료 시 agent가 작성한 의미 요약을 전달합니다. CLI는 의미를 추측하지 않고 이를 저장한 뒤 close, index update, check를 수행합니다.
 
 ```bash
-./pm session close S-001
-./pm index update --session S-001
-./pm check
+./pm session finish S-001 \\
+  --one-line "완료 요약" \\
+  --flow "작업 흐름" \\
+  --intent "사용자 의도" \\
+  --next "다음 작업"
 ```
+
+닫힌 session에는 새 raw/turn/decision/action/question source event를 추가하지 않습니다. 이미 작성된 optional summary section은 해당 `finish` flag를 생략하면 보존됩니다.
 
 ## PRD Lifecycle
 
@@ -184,14 +207,17 @@ PRD는 제품 요구사항과 변경 상태의 source of truth이며, session은
 ./pm prd link P-001 --decision D-001
 ./pm prd link P-001 --action A-001
 ./pm prd status P-001 --status active
+./pm requirement add --prd P-001 --text "요구사항" --status proposed --session S-001 --turn T-001
+./pm requirement status R-001 --status accepted --session S-001 --turn T-001
+./pm requirement list --prd P-001
 ./pm prd index
 ```
 
-`prd link`는 이미 기록된 관계를 다시 추가하지 않습니다. `prd status`는 metadata와 `prd-spec/<status>/` 위치를 함께 갱신하며, `cancelled`도 삭제 대신 별도 상태 폴더로 보존합니다.
+`prd link`는 이미 기록된 관계를 다시 추가하지 않습니다. `prd status`는 metadata와 `prd-spec/<status>/` 위치를 함께 갱신하며, `cancelled`도 삭제 대신 별도 상태 폴더로 보존합니다. Requirement는 PRD 내부 managed block으로 보존되며 상태 변경 이력과 source session/turn을 가집니다. 기존 authored `R-xxx` 표기는 allocator가 예약합니다.
 
 ## Recover Context
 
-새 session에서 맥락을 복구할 때는 `main.md`, `index/decisions.md`, `index/next-actions.md`, `index/open-questions.md`, `index/session-map.md`를 순서대로 확인합니다. 필요한 경우 가장 최근 session의 `summary.md`와 `turns.md`를 추가로 읽습니다.
+새 session에서 맥락을 복구할 때는 `./pm context brief`를 실행합니다. 이 출력은 `main.md`, 활성 PRD와 진행 중 requirement, source session의 현재 records, 최근 summary와 structural health를 간결히 집계합니다. 필요한 경우 원문 파일을 추가로 읽습니다.
 
 ## Validate
 
@@ -200,11 +226,11 @@ PRD는 제품 요구사항과 변경 상태의 source of truth이며, session은
 python3 -m unittest discover -s tests -v
 ```
 
-`check`는 필수 구조, session 이름, 누락 파일, 관리 ID 중복, PRD 상태/경로와 relation 무결성, PRD map 최신성을 검사합니다.
+`check`는 필수 구조, session 이름, 누락 파일, 관리 ID 중복, record status, PRD 상태/경로와 relation, requirement provenance, PRD map 최신성을 검사합니다.
 
 ## Known Limits
 
-CLI는 자동 의미 요약, requirement 수준 변경 이력 명령, 결정 간 충돌 판단을 하지 않습니다. 사람 또는 agent가 의미 있는 문장을 작성하고 CLI는 구조와 기계적 반영을 담당합니다.
+CLI는 자동 의미 요약, 결정 간 의미 충돌 판단, profile/Slack routing 저장을 하지 않습니다. 사람 또는 agent가 의미 있는 문장을 작성하고 CLI는 구조, provenance와 기계적 반영을 담당합니다.
 """,
     "index/decisions.md": """# Decisions Index
 
@@ -277,7 +303,7 @@ CLI는 자동 의미 요약, requirement 수준 변경 이력 명령, 결정 간
 
 ## Requirements
 
-중요한 요구사항에는 선택적으로 안정적인 ID(`R-001`)와 상태(`proposed`, `accepted`, `deferred`, `removed`, `rolled_back`)를 기록합니다.
+중요한 요구사항은 CLI가 안정적인 ID(`R-xxx`)와 상태 이력을 관리합니다.
 
 ## Functional Requirements
 
@@ -444,6 +470,11 @@ def find_ids(root: Path, prefix: str) -> list[int]:
                     numbers.add(int(PRD_RE.match(match.group(1)).group(1)))
                 numbers.update(int(match) for match in pattern.findall(read_text(path)))
         return sorted(numbers)
+    if prefix == "R":
+        pattern = re.compile(r"\bR-(\d{3,})\b")
+        for path in prd_paths(root):
+            numbers.update(int(match) for match in pattern.findall(read_text(path)))
+        return sorted(numbers)
     kinds = {"T": "turn", "D": "decision", "A": "action", "Q": "question"}
     kind = kinds[prefix]
     pattern = re.compile(rf"<!-- PM:{kind}:{re.escape(prefix)}-(\d{{3,}}):start -->")
@@ -472,6 +503,17 @@ def validate_session(root: Path, session_id: str) -> Path | None:
     return path
 
 
+def require_open_session(root: Path, session_id: str) -> Path | None:
+    path = validate_session(root, session_id)
+    if not path:
+        return None
+    summary_path = path / "summary.md"
+    if summary_path.exists() and "- Status: closed" in read_text(summary_path):
+        print(f"오류: closed session `{session_id}`에는 새 source event를 기록할 수 없습니다.", file=sys.stderr)
+        return None
+    return path
+
+
 def markdown_field(label: str, value: str) -> str:
     clean = value.strip()
     if not clean:
@@ -480,6 +522,44 @@ def markdown_field(label: str, value: str) -> str:
         return f"- {label}: {clean}\n"
     indented = clean.replace("\n", "\n  ")
     return f"- {label}:\n  {indented}\n"
+
+
+def markdown_section(text: str, heading: str) -> str:
+    pattern = re.compile(
+        rf"^## {re.escape(heading)}\s*\n+(?P<body>.*?)(?=^## |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    match = pattern.search(text)
+    return match.group("body").strip() if match else ""
+
+
+def replace_markdown_section(text: str, heading: str, content: str) -> str:
+    pattern = re.compile(
+        rf"^## {re.escape(heading)}\s*\n+.*?(?=^## |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    replacement = f"## {heading}\n\n{content.strip()}\n\n"
+    if not pattern.search(text):
+        return text.rstrip() + "\n\n" + replacement
+    return pattern.sub(lambda _: replacement, text, count=1)
+
+
+def parse_fields(body: str, labels: tuple[str, ...]) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for label in labels:
+        match = re.search(rf"^- {re.escape(label)}:[ \t]*(.*)$", body, re.MULTILINE)
+        fields[label] = match.group(1).strip() if match else ""
+    return fields
+
+
+def replace_bullet_field(block: str, label: str, value: str) -> str:
+    line = markdown_field(label, value).rstrip()
+    pattern = re.compile(rf"^- {re.escape(label)}:.*$", re.MULTILINE)
+    if pattern.search(block):
+        return pattern.sub(lambda _: line, block, count=1)
+    marker = re.search(r"^<!-- PM:[^:]+:[A-Z]-\d+:end -->", block, re.MULTILINE)
+    insertion = marker.start() if marker else len(block)
+    return block[:insertion].rstrip() + "\n" + line + "\n" + block[insertion:]
 
 
 def extract_one_line_summary(summary_path: Path) -> str:
@@ -624,7 +704,7 @@ def mark_summary_closed(summary_path: Path) -> bool:
     has_tbd = bool(re.search(r"## One-line Summary\s*\n+\s*TBD", text))
     if has_tbd and "TODO: 의미 요약을 작성한 뒤" not in text:
         text += "\n> TODO: 의미 요약을 작성한 뒤 `./pm index update --session <ID>`를 다시 실행하여 session map을 갱신합니다.\n"
-    summary_path.write_text(text, encoding="utf-8")
+    write_text_atomic(summary_path, text)
     return has_tbd
 
 
@@ -632,14 +712,15 @@ def command_session_close(args: argparse.Namespace) -> int:
     root = project_root()
     if not require_initialized(root):
         return 1
-    session_dir = validate_session(root, args.session)
-    if not session_dir:
-        return 1
-    summary_path = session_dir / "summary.md"
-    if not summary_path.exists():
-        summary_path.write_text(session_templates(args.session)["summary.md"], encoding="utf-8")
-    has_tbd = mark_summary_closed(summary_path)
-    session_map_update(root, args.session, "closed")
+    with project_lock(root):
+        session_dir = validate_session(root, args.session)
+        if not session_dir:
+            return 1
+        summary_path = session_dir / "summary.md"
+        if not summary_path.exists():
+            write_text_atomic(summary_path, session_templates(args.session)["summary.md"])
+        has_tbd = mark_summary_closed(summary_path)
+        session_map_update(root, args.session, "closed")
     print(f"{args.session} closed.")
     if has_tbd:
         print("주의: summary의 One-line Summary가 아직 TBD입니다. 의미 요약을 작성하세요.")
@@ -647,24 +728,116 @@ def command_session_close(args: argparse.Namespace) -> int:
     return 0
 
 
+def session_record_summary(session_dir: Path, kind: str, filename: str, label: str, empty: str) -> str:
+    blocks = blocks_from(read_text(session_dir / filename), kind)
+    if not blocks:
+        return empty
+    lines = []
+    for item_id, block in blocks:
+        value = parse_fields(block, (label,))[label]
+        lines.append(f"- {item_id}: {value}" if value else f"- {item_id}")
+    return "\n".join(lines)
+
+
+def optional_summary_content(text: str, heading: str, supplied: str | None, default: str) -> str:
+    if supplied is not None:
+        return supplied
+    existing = markdown_section(text, heading)
+    if existing and not existing.startswith("TBD"):
+        return existing
+    return default
+
+
+def command_session_finish(args: argparse.Namespace) -> int:
+    root = project_root()
+    if not require_initialized(root):
+        return 1
+    required = {
+        "one-line summary": args.one_line,
+        "overall flow": args.flow,
+        "user intent": args.intent,
+        "next actions": args.next,
+    }
+    for label, value in required.items():
+        if not value.strip():
+            return fail(f"{label}는 비어 있을 수 없습니다.")
+    with project_lock(root):
+        session_dir = validate_session(root, args.session)
+        if not session_dir:
+            return 1
+        preexisting_errors = collect_check_errors(root)
+        if preexisting_errors:
+            print("Project Master check failed before session finish:", file=sys.stderr)
+            for error in preexisting_errors:
+                print(f"- {error}", file=sys.stderr)
+            return 1
+        summary_path = session_dir / "summary.md"
+        text = read_text(summary_path) if summary_path.exists() else session_templates(args.session)["summary.md"]
+        text = replace_markdown_section(text, "One-line Summary", args.one_line)
+        text = replace_markdown_section(text, "Overall Flow", args.flow)
+        text = replace_markdown_section(text, "User Intent", args.intent)
+        text = replace_markdown_section(
+            text,
+            "Key Discussion Points",
+            optional_summary_content(text, "Key Discussion Points", args.discussion, "별도 논의 사항 없음."),
+        )
+        text = replace_markdown_section(
+            text,
+            "Decisions Made",
+            session_record_summary(session_dir, "decision", "decisions.md", "Decision", "기록된 결정 없음."),
+        )
+        text = replace_markdown_section(
+            text,
+            "Open Questions",
+            session_record_summary(session_dir, "question", "open-questions.md", "Question", "열린 질문 없음."),
+        )
+        text = replace_markdown_section(text, "Next Actions", args.next)
+        text = replace_markdown_section(
+            text,
+            "Turn Log Context Analysis",
+            optional_summary_content(
+                text,
+                "Turn Log Context Analysis",
+                args.analysis,
+                "`turns.md`에 기록된 source turn을 참조합니다.",
+            ),
+        )
+        text = re.sub(r"^- Status: .*$", "- Status: closed", text, count=1, flags=re.MULTILINE)
+        write_text_atomic(summary_path, text)
+        counts, log_added = update_session_indexes(root, args.session)
+        errors = collect_check_errors(root)
+    if errors:
+        print("Project Master check failed:", file=sys.stderr)
+        for error in errors:
+            print(f"- {error}", file=sys.stderr)
+        return 1
+    print(
+        f"{args.session} finished: added {counts['added']}, updated {counts['updated']}, "
+        f"changelog {'added' if log_added else 'unchanged'}; check passed."
+    )
+    return 0
+
+
 def append_text(path: Path, content: str) -> None:
-    with path.open("a", encoding="utf-8") as handle:
-        if not content.startswith("\n"):
-            handle.write("\n")
-        handle.write(content)
-        if not content.endswith("\n"):
-            handle.write("\n")
+    text = read_text(path) if path.exists() else ""
+    if text and not content.startswith("\n"):
+        text += "\n"
+    text += content
+    if not text.endswith("\n"):
+        text += "\n"
+    write_text_atomic(path, text)
 
 
 def command_raw_append(args: argparse.Namespace) -> int:
     root = project_root()
     if not require_initialized(root):
         return 1
-    session_dir = validate_session(root, args.session)
-    if not session_dir:
-        return 1
-    entry = f"## {now_timestamp()} - {args.role}\n\n{args.content.strip()}\n"
-    append_text(session_dir / "raw.md", entry)
+    with project_lock(root):
+        session_dir = require_open_session(root, args.session)
+        if not session_dir:
+            return 1
+        entry = f"## {now_timestamp()} - {args.role}\n\n{args.content.strip()}\n"
+        append_text(session_dir / "raw.md", entry)
     print(f"{args.session} raw entry 추가됨.")
     return 0
 
@@ -678,7 +851,7 @@ def command_turn_add(args: argparse.Namespace) -> int:
     if not require_initialized(root):
         return 1
     with project_lock(root):
-        session_dir = validate_session(root, args.session)
+        session_dir = require_open_session(root, args.session)
         if not session_dir:
             return 1
         item_id = next_id(root, "T")
@@ -698,7 +871,7 @@ def command_decision_add(args: argparse.Namespace) -> int:
     if not require_initialized(root):
         return 1
     with project_lock(root):
-        session_dir = validate_session(root, args.session)
+        session_dir = require_open_session(root, args.session)
         if not session_dir:
             return 1
         item_id = next_id(root, "D")
@@ -721,7 +894,7 @@ def command_action_add(args: argparse.Namespace) -> int:
     if not require_initialized(root):
         return 1
     with project_lock(root):
-        session_dir = validate_session(root, args.session)
+        session_dir = require_open_session(root, args.session)
         if not session_dir:
             return 1
         item_id = next_id(root, "A")
@@ -742,7 +915,7 @@ def command_question_add(args: argparse.Namespace) -> int:
     if not require_initialized(root):
         return 1
     with project_lock(root):
-        session_dir = validate_session(root, args.session)
+        session_dir = require_open_session(root, args.session)
         if not session_dir:
             return 1
         item_id = next_id(root, "Q")
@@ -766,6 +939,101 @@ def blocks_from(text: str, kind: str) -> list[tuple[str, str]]:
     return [(match.group("id"), match.group(0).rstrip() + "\n") for match in pattern.finditer(text)]
 
 
+SESSION_RECORD_FILES = {
+    "decision": ("D", "decisions.md", "index/decisions.md"),
+    "action": ("A", "actions.md", "index/next-actions.md"),
+    "question": ("Q", "open-questions.md", "index/open-questions.md"),
+}
+
+
+def find_session_record(root: Path, kind: str, item_id: str) -> tuple[Path, str] | None:
+    prefix, filename, _ = SESSION_RECORD_FILES[kind]
+    if not re.match(rf"^{prefix}-\d{{3,}}$", item_id):
+        print(f"오류: 잘못된 {kind} ID `{item_id}`입니다.", file=sys.stderr)
+        return None
+    matches: list[tuple[Path, str]] = []
+    for session_dir in session_paths(root):
+        for found_id, block in blocks_from(read_text(session_dir / filename), kind):
+            if found_id == item_id:
+                matches.append((session_dir / filename, block))
+    if not matches:
+        print(f"오류: {kind} `{item_id}`를 찾을 수 없습니다.", file=sys.stderr)
+        return None
+    if len(matches) > 1:
+        print(f"오류: {kind} `{item_id}`가 여러 번 기록되어 있습니다.", file=sys.stderr)
+        return None
+    return matches[0]
+
+
+def replace_record_block(path: Path, original: str, updated: str) -> None:
+    text = read_text(path)
+    write_text_atomic(path, text.replace(original, updated, 1))
+
+
+def update_session_record_status(root: Path, kind: str, item_id: str, status: str) -> str | None:
+    record = find_session_record(root, kind, item_id)
+    if not record:
+        return None
+    source_path, original = record
+    updated = replace_bullet_field(original, "Status", status)
+    if kind == "action":
+        updated = replace_bullet_field(updated, "Updated", today())
+    replace_record_block(source_path, original, updated)
+    _, _, index_name = SESSION_RECORD_FILES[kind]
+    index_path = root / index_name
+    if not index_path.exists():
+        write_text_atomic(index_path, INITIAL_FILES[index_name])
+    upsert_block(index_path, kind, item_id, updated)
+    return updated
+
+
+def command_decision_status(args: argparse.Namespace) -> int:
+    root = project_root()
+    if not require_initialized(root):
+        return 1
+    with project_lock(root):
+        if args.by:
+            if args.status != "superseded":
+                return fail("`--by`는 superseded status와 함께 사용해야 합니다.")
+            if args.by == args.decision or not find_session_record(root, "decision", args.by):
+                return fail(f"유효한 superseding decision이 아닙니다: `{args.by}`")
+        updated = update_session_record_status(root, "decision", args.decision, args.status)
+        if updated is None:
+            return 1
+        if args.by:
+            record = find_session_record(root, "decision", args.decision)
+            if not record:
+                return 1
+            path, block = record
+            rewritten = replace_bullet_field(block, "Superseded by", args.by)
+            replace_record_block(path, block, rewritten)
+            upsert_block(root / "index" / "decisions.md", "decision", args.decision, rewritten)
+    print(f"{args.decision} status={args.status}")
+    return 0
+
+
+def command_action_status(args: argparse.Namespace) -> int:
+    root = project_root()
+    if not require_initialized(root):
+        return 1
+    with project_lock(root):
+        if update_session_record_status(root, "action", args.action, args.status) is None:
+            return 1
+    print(f"{args.action} status={args.status}")
+    return 0
+
+
+def command_question_status(args: argparse.Namespace) -> int:
+    root = project_root()
+    if not require_initialized(root):
+        return 1
+    with project_lock(root):
+        if update_session_record_status(root, "question", args.question, args.status) is None:
+            return 1
+    print(f"{args.question} status={args.status}")
+    return 0
+
+
 def single_line(value: str) -> str:
     return " ".join(value.strip().split())
 
@@ -780,11 +1048,7 @@ def prd_paths(root: Path) -> list[Path]:
 
 
 def parse_prd_fields(body: str) -> dict[str, str]:
-    fields: dict[str, str] = {}
-    for label in PRD_FIELD_ORDER:
-        match = re.search(rf"^- {re.escape(label)}:[ \t]*(.*)$", body, re.MULTILINE)
-        fields[label] = match.group(1).strip() if match else ""
-    return fields
+    return parse_fields(body, PRD_FIELD_ORDER)
 
 
 def render_prd_block(prd_id: str, fields: dict[str, str]) -> str:
@@ -828,6 +1092,196 @@ def update_prd_metadata(path: Path, prd_id: str, fields: dict[str, str]) -> None
 
 def relation_values(fields: dict[str, str], label: str) -> list[str]:
     return [value.strip() for value in fields.get(label, "").split(",") if value.strip()]
+
+
+def add_relation(fields: dict[str, str], label: str, target: str | None) -> bool:
+    if not target:
+        return False
+    values = relation_values(fields, label)
+    if target in values:
+        return False
+    values.append(target)
+    fields[label] = ", ".join(values)
+    return True
+
+
+def parse_requirement_fields(block: str) -> dict[str, str]:
+    return parse_fields(block, REQUIREMENT_FIELD_ORDER)
+
+
+def requirement_history(block: str) -> str:
+    match = re.search(
+        r"^### History\s*\n+(?P<body>.*?)(?=^<!-- PM:requirement:[A-Z]-\d+:end -->|\Z)",
+        block,
+        re.MULTILINE | re.DOTALL,
+    )
+    return match.group("body").strip() if match else ""
+
+
+def render_requirement_block(requirement_id: str, fields: dict[str, str], history: str) -> str:
+    body = f"## {requirement_id}: {fields['Text']}\n\n"
+    body += "".join(markdown_field(label, fields.get(label, "")) for label in REQUIREMENT_FIELD_ORDER)
+    body += "\n### History\n\n"
+    body += history.strip() + "\n"
+    return managed_block("requirement", requirement_id, body)
+
+
+def provenance_history(status: str, session: str | None, turn: str | None) -> str:
+    return f"- {today()}: status={status}; session={session or '-'}; turn={turn or '-'}"
+
+
+def validate_requirement_source(root: Path, session: str | None, turn: str | None) -> bool:
+    for label, prefix, target in (("session", "S", session), ("turn", "T", turn)):
+        if target and not prd_reference_exists(root, prefix, target):
+            print(f"오류: 존재하지 않는 requirement {label} source `{target}`입니다.", file=sys.stderr)
+            return False
+    return True
+
+
+def insert_requirement_block(text: str, block: str) -> str | None:
+    heading = re.search(r"^## Requirements\s*$", text, re.MULTILINE)
+    if not heading:
+        return None
+    tail = text[heading.end():]
+    requirement_pattern = re.compile(
+        r"^<!-- PM:requirement:(?P<id>R-\d+):start -->\n.*?"
+        r"^<!-- PM:requirement:(?P=id):end -->\n?",
+        re.MULTILINE | re.DOTALL,
+    )
+    existing = list(requirement_pattern.finditer(tail))
+    if existing:
+        insertion = heading.end() + existing[-1].end()
+    else:
+        next_heading = re.search(r"^## ", tail, re.MULTILINE)
+        insertion = heading.end() + (next_heading.start() if next_heading else len(tail))
+    before = text[:insertion].rstrip()
+    after = text[insertion:].lstrip("\n")
+    return before + "\n\n" + block.rstrip() + "\n\n" + after
+
+
+def find_requirement(root: Path, requirement_id: str) -> tuple[Path, str, dict[str, str], str] | None:
+    if not REQUIREMENT_RE.match(requirement_id):
+        print(f"오류: 잘못된 requirement ID `{requirement_id}`입니다.", file=sys.stderr)
+        return None
+    matches: list[tuple[Path, str, dict[str, str], str]] = []
+    for path in prd_paths(root):
+        metadata = read_prd_metadata(path)
+        if not metadata:
+            return None
+        prd_id, _ = metadata
+        for found_id, block in blocks_from(read_text(path), "requirement"):
+            if found_id == requirement_id:
+                matches.append((path, prd_id, parse_requirement_fields(block), block))
+    if not matches:
+        print(f"오류: requirement `{requirement_id}`를 찾을 수 없습니다.", file=sys.stderr)
+        return None
+    if len(matches) > 1:
+        print(f"오류: requirement `{requirement_id}`가 여러 번 기록되어 있습니다.", file=sys.stderr)
+        return None
+    return matches[0]
+
+
+def update_prd_provenance(
+    path: Path,
+    prd_id: str,
+    fields: dict[str, str],
+    session: str | None,
+    turn: str | None,
+) -> None:
+    add_relation(fields, "Source Sessions", session)
+    add_relation(fields, "Source Turns", turn)
+    fields["Updated"] = today()
+    update_prd_metadata(path, prd_id, fields)
+
+
+def command_requirement_add(args: argparse.Namespace) -> int:
+    root = project_root()
+    if not require_initialized(root):
+        return 1
+    text = single_line(args.text)
+    if not text:
+        return fail("requirement text는 비어 있을 수 없습니다.")
+    with project_lock(root):
+        record = find_prd(root, args.prd)
+        if not record:
+            return 1
+        if not validate_requirement_source(root, args.session, args.turn):
+            return 1
+        path, prd_fields = record
+        requirement_id = next_id(root, "R")
+        fields = {
+            "Requirement ID": requirement_id,
+            "PRD": args.prd,
+            "Text": text,
+            "Status": args.status,
+            "Created": today(),
+            "Updated": today(),
+            "Last Source Session": args.session or "",
+            "Last Source Turn": args.turn or "",
+        }
+        block = render_requirement_block(
+            requirement_id,
+            fields,
+            provenance_history(args.status, args.session, args.turn),
+        )
+        updated = insert_requirement_block(read_text(path), block)
+        if updated is None:
+            return fail(f"PRD `{args.prd}`에 `## Requirements` section이 없습니다.")
+        write_text_atomic(path, updated)
+        update_prd_provenance(path, args.prd, prd_fields, args.session, args.turn)
+        if not rebuild_prd_index(root):
+            return 1
+    print(f"{requirement_id} prd={args.prd} status={args.status}")
+    return 0
+
+
+def command_requirement_list(args: argparse.Namespace) -> int:
+    root = project_root()
+    if not require_initialized(root):
+        return 1
+    with project_lock(root):
+        record = find_prd(root, args.prd)
+        if not record:
+            return 1
+        blocks = sorted(
+            blocks_from(read_text(record[0]), "requirement"),
+            key=lambda item: int(REQUIREMENT_RE.match(item[0]).group(1)),
+        )
+        if not blocks:
+            print("requirement가 없습니다.")
+            return 0
+        for requirement_id, block in blocks:
+            fields = parse_requirement_fields(block)
+            print(f"{requirement_id} | {fields['Status']} | {fields['Text']}")
+    return 0
+
+
+def command_requirement_status(args: argparse.Namespace) -> int:
+    root = project_root()
+    if not require_initialized(root):
+        return 1
+    with project_lock(root):
+        record = find_requirement(root, args.requirement)
+        if not record:
+            return 1
+        if not validate_requirement_source(root, args.session, args.turn):
+            return 1
+        path, prd_id, fields, original = record
+        metadata = read_prd_metadata(path)
+        if not metadata:
+            return 1
+        fields["Status"] = args.status
+        fields["Updated"] = today()
+        fields["Last Source Session"] = args.session
+        fields["Last Source Turn"] = args.turn
+        history = requirement_history(original)
+        history = history + "\n" + provenance_history(args.status, args.session, args.turn)
+        replace_record_block(path, original, render_requirement_block(args.requirement, fields, history))
+        update_prd_provenance(path, prd_id, metadata[1], args.session, args.turn)
+        if not rebuild_prd_index(root):
+            return 1
+    print(f"{args.requirement} status={args.status}")
+    return 0
 
 
 def prd_reference_exists(root: Path, prefix: str, item_id: str) -> bool:
@@ -1049,7 +1503,7 @@ def upsert_block(index_path: Path, kind: str, item_id: str, block: str) -> str:
         re.DOTALL,
     )
     if pattern.search(text):
-        index_path.write_text(pattern.sub(block, text, count=1), encoding="utf-8")
+        write_text_atomic(index_path, pattern.sub(lambda _: block, text, count=1))
         return "updated"
     append_text(index_path, block)
     return "added"
@@ -1066,13 +1520,8 @@ def changelog_update(root: Path, session_id: str) -> bool:
     return True
 
 
-def command_index_update(args: argparse.Namespace) -> int:
-    root = project_root()
-    if not require_initialized(root):
-        return 1
-    session_dir = validate_session(root, args.session)
-    if not session_dir:
-        return 1
+def update_session_indexes(root: Path, session_id: str) -> tuple[dict[str, int], bool]:
+    session_dir = root / "sessions" / session_id
     mappings = (
         ("decision", "decisions.md", "index/decisions.md"),
         ("action", "actions.md", "index/next-actions.md"),
@@ -1088,8 +1537,19 @@ def command_index_update(args: argparse.Namespace) -> int:
             result = upsert_block(target, kind, item_id, block)
             counts[result] += 1
     status = "closed" if "- Status: closed" in read_text(session_dir / "summary.md") else "open"
-    session_map_update(root, args.session, status)
-    log_added = changelog_update(root, args.session)
+    session_map_update(root, session_id, status)
+    return counts, changelog_update(root, session_id)
+
+
+def command_index_update(args: argparse.Namespace) -> int:
+    root = project_root()
+    if not require_initialized(root):
+        return 1
+    with project_lock(root):
+        session_dir = validate_session(root, args.session)
+        if not session_dir:
+            return 1
+        counts, log_added = update_session_indexes(root, args.session)
     print(f"{args.session}: added {counts['added']}, updated {counts['updated']}, changelog {'added' if log_added else 'unchanged'}.")
     return 0
 
@@ -1117,6 +1577,11 @@ def collect_check_errors(root: Path) -> list[str]:
         if not (root / relative).is_file():
             errors.append(f"missing file: {relative}")
     source_ids: dict[str, list[str]] = {"turn": [], "decision": [], "action": [], "question": []}
+    status_choices = {
+        "decision": DECISION_STATUSES,
+        "action": ACTION_STATUSES,
+        "question": QUESTION_STATUSES,
+    }
     for path in (root / "sessions").iterdir() if (root / "sessions").is_dir() else []:
         if not path.is_dir():
             continue
@@ -1132,7 +1597,13 @@ def collect_check_errors(root: Path) -> list[str]:
             ("action", "actions.md"),
             ("question", "open-questions.md"),
         ):
-            source_ids[kind].extend(marker_ids(path / filename, kind))
+            records = blocks_from(read_text(path / filename), kind)
+            source_ids[kind].extend(item_id for item_id, _ in records)
+            if kind in status_choices:
+                for item_id, block in records:
+                    status_value = parse_fields(block, ("Status",))["Status"]
+                    if status_value not in status_choices[kind]:
+                        errors.append(f"invalid {kind} status in {item_id}: {status_value}")
     for kind, ids in source_ids.items():
         for item_id in duplicates(ids):
             errors.append(f"duplicate {kind} ID in sessions: {item_id}")
@@ -1156,6 +1627,7 @@ def collect_check_errors(root: Path) -> list[str]:
         "Related Actions": set(source_ids["action"]),
     }
     prd_ids: list[str] = []
+    requirement_ids: list[str] = []
     known_prd_paths: set[Path] = set()
     for status in PRD_STATUSES:
         directory = root / "prd-spec" / status
@@ -1168,7 +1640,8 @@ def collect_check_errors(root: Path) -> list[str]:
                 errors.append(f"invalid PRD filename: prd-spec/{status}/{path.name}")
                 continue
             filename_id = filename_match.group(1)
-            blocks = blocks_from(read_text(path), "prd")
+            document = read_text(path)
+            blocks = blocks_from(document, "prd")
             if len(blocks) != 1:
                 errors.append(f"invalid PRD metadata block: prd-spec/{status}/{path.name}")
                 continue
@@ -1194,6 +1667,39 @@ def collect_check_errors(root: Path) -> list[str]:
                 for value in values:
                     if value not in targets:
                         errors.append(f"invalid PRD relation in {marker_id}: {label} {value}")
+            for requirement_id, requirement_block in blocks_from(document, "requirement"):
+                requirement_ids.append(requirement_id)
+                requirement_fields = parse_requirement_fields(requirement_block)
+                missing_requirement_fields = [
+                    label for label in REQUIREMENT_FIELD_ORDER
+                    if not re.search(rf"^- {re.escape(label)}:", requirement_block, re.MULTILINE)
+                ]
+                if missing_requirement_fields:
+                    errors.append(
+                        f"missing requirement metadata field in {requirement_id}: "
+                        f"{', '.join(missing_requirement_fields)}"
+                    )
+                if requirement_fields["Requirement ID"] != requirement_id:
+                    errors.append(f"requirement ID mismatch: {requirement_id}")
+                if requirement_fields["PRD"] != marker_id:
+                    errors.append(f"requirement parent mismatch: {requirement_id} in {marker_id}")
+                if requirement_fields["Status"] not in REQUIREMENT_STATUSES:
+                    errors.append(f"invalid requirement status in {requirement_id}: {requirement_fields['Status']}")
+                if not requirement_history(requirement_block):
+                    errors.append(f"missing requirement history in {requirement_id}")
+                for label, targets in (
+                    ("Last Source Session", session_ids),
+                    ("Last Source Turn", set(source_ids["turn"])),
+                ):
+                    target = requirement_fields[label]
+                    if target and target not in targets:
+                        errors.append(f"invalid requirement source in {requirement_id}: {label} {target}")
+                for value in re.findall(r"\bsession=(S-\d{3,})\b", requirement_history(requirement_block)):
+                    if value not in session_ids:
+                        errors.append(f"invalid requirement history source in {requirement_id}: session {value}")
+                for value in re.findall(r"\bturn=(T-\d{3,})\b", requirement_history(requirement_block)):
+                    if value not in set(source_ids["turn"]):
+                        errors.append(f"invalid requirement history source in {requirement_id}: turn {value}")
     prd_root = root / "prd-spec"
     if prd_root.is_dir():
         template = prd_root / "template.md"
@@ -1205,6 +1711,8 @@ def collect_check_errors(root: Path) -> list[str]:
                 errors.append(f"invalid PRD location: {path.relative_to(root)}")
     for prd_id in duplicates(prd_ids):
         errors.append(f"duplicate PRD ID: {prd_id}")
+    for requirement_id in duplicates(requirement_ids):
+        errors.append(f"duplicate requirement ID: {requirement_id}")
     prd_map = root / "index" / "prd-map.md"
     if prd_map.exists():
         map_text = read_text(prd_map)
@@ -1247,10 +1755,8 @@ def command_status(_: argparse.Namespace) -> int:
         sessions = session_paths(root)
         latest = sessions[-1].name if sessions else "none"
         missing = collect_check_errors(root)
-        decisions_path = root / "index" / "decisions.md"
-        actions_path = root / "index" / "next-actions.md"
-        active = len(re.findall(r"^- Status: active$", read_text(decisions_path), re.MULTILINE)) if decisions_path.exists() else 0
-        pending = len(re.findall(r"^- Status: pending$", read_text(actions_path), re.MULTILINE)) if actions_path.exists() else 0
+        active = len(current_record_items(root, "decision", "decisions.md", "active", "Decision"))
+        pending = len(current_record_items(root, "action", "actions.md", "pending", "Action"))
         print(f"latest session: {latest}")
         print(f"sessions: {len(sessions)}")
         print(f"active decisions: {active}")
@@ -1265,6 +1771,73 @@ def command_status(_: argparse.Namespace) -> int:
     return 0
 
 
+def current_record_items(root: Path, kind: str, filename: str, status: str, label: str) -> list[str]:
+    items: list[str] = []
+    for session_dir in session_paths(root):
+        path = session_dir / filename
+        if not path.exists():
+            continue
+        for item_id, block in blocks_from(read_text(path), kind):
+            fields = parse_fields(block, ("Status", label))
+            if fields["Status"] == status:
+                items.append(f"- {item_id}: {fields[label]}" if fields[label] else f"- {item_id}")
+    return items
+
+
+def command_context_brief(_: argparse.Namespace) -> int:
+    root = project_root()
+    if not require_initialized(root):
+        return 1
+    with project_lock(root):
+        main = read_text(root / "main.md")
+        active_prds = []
+        open_requirements = []
+        for path in prd_paths(root):
+            metadata = read_prd_metadata(path)
+            if not metadata:
+                return 1
+            prd_id, fields = metadata
+            if fields["Status"] == "active":
+                active_prds.append(f"- {prd_id}: {fields['Title']}")
+                for requirement_id, block in blocks_from(read_text(path), "requirement"):
+                    requirement = parse_requirement_fields(block)
+                    if requirement["Status"] in ("proposed", "accepted", "deferred"):
+                        open_requirements.append(
+                            f"- {requirement_id} ({requirement['Status']}, {prd_id}): {requirement['Text']}"
+                        )
+        pending_actions = current_record_items(root, "action", "actions.md", "pending", "Action")
+        open_questions = current_record_items(root, "question", "open-questions.md", "open", "Question")
+        active_decisions = current_record_items(root, "decision", "decisions.md", "active", "Decision")
+        recent_sessions = []
+        for session_dir in reversed(session_paths(root)[-3:]):
+            summary = extract_one_line_summary(session_dir / "summary.md")
+            text = read_text(session_dir / "summary.md")
+            state = "closed" if "- Status: closed" in text else "open"
+            recent_sessions.append(f"- {session_dir.name} ({state}): {summary}")
+        errors = collect_check_errors(root)
+    print("# Project Master Brief")
+    for title, value in (
+        ("Project Overview", markdown_section(main, "Project Overview") or "기록 없음."),
+        ("Current Focus", markdown_section(main, "Current Focus") or "기록 없음."),
+    ):
+        print(f"\n## {title}\n\n{value}")
+    for title, items in (
+        ("Active PRDs", active_prds),
+        ("Open Requirements", open_requirements),
+        ("Pending Actions", pending_actions),
+        ("Open Questions", open_questions),
+        ("Active Decisions", active_decisions),
+        ("Recent Sessions", recent_sessions),
+    ):
+        print(f"\n## {title}\n")
+        print("\n".join(items) if items else "- none")
+    print("\n## Health\n")
+    print("- structural check: passed" if not errors else "- structural check: failed")
+    for error in errors:
+        print(f"- {error}")
+    return 0 if not errors else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pm", description="파일 기반 Project Master CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1275,6 +1848,10 @@ def build_parser() -> argparse.ArgumentParser:
     status.set_defaults(func=command_status)
     check = subparsers.add_parser("check", help="구조 검증")
     check.set_defaults(func=command_check)
+    context = subparsers.add_parser("context", help="agent 시작 context 조회")
+    context_sub = context.add_subparsers(dest="context_command", required=True)
+    context_brief = context_sub.add_parser("brief", help="현재 project memory 요약")
+    context_brief.set_defaults(func=command_context_brief)
 
     session = subparsers.add_parser("session", help="session 관리")
     session_sub = session.add_subparsers(dest="session_command", required=True)
@@ -1288,6 +1865,15 @@ def build_parser() -> argparse.ArgumentParser:
     session_close = session_sub.add_parser("close", help="session 종료")
     session_close.add_argument("session")
     session_close.set_defaults(func=command_session_close)
+    session_finish = session_sub.add_parser("finish", help="의미 요약을 기록하고 session 종료 및 검증")
+    session_finish.add_argument("session")
+    session_finish.add_argument("--one-line", required=True)
+    session_finish.add_argument("--flow", required=True)
+    session_finish.add_argument("--intent", required=True)
+    session_finish.add_argument("--next", required=True)
+    session_finish.add_argument("--discussion")
+    session_finish.add_argument("--analysis")
+    session_finish.set_defaults(func=command_session_finish)
 
     raw = subparsers.add_parser("raw", help="raw conversation 관리")
     raw_sub = raw.add_subparsers(dest="raw_command", required=True)
@@ -1313,27 +1899,40 @@ def build_parser() -> argparse.ArgumentParser:
     decision_add = decision_sub.add_parser("add", help="decision 추가")
     decision_add.add_argument("--session", required=True)
     decision_add.add_argument("--title", required=True)
-    decision_add.add_argument("--status", default="active")
+    decision_add.add_argument("--status", choices=DECISION_STATUSES, default="active")
     decision_add.add_argument("--rationale", required=True)
     decision_add.add_argument("--source", required=True)
     decision_add.set_defaults(func=command_decision_add)
+    decision_status = decision_sub.add_parser("status", help="decision 상태 변경")
+    decision_status.add_argument("decision")
+    decision_status.add_argument("--status", choices=DECISION_STATUSES, required=True)
+    decision_status.add_argument("--by", help="superseding decision ID")
+    decision_status.set_defaults(func=command_decision_status)
 
     action = subparsers.add_parser("action", help="next action 관리")
     action_sub = action.add_subparsers(dest="action_command", required=True)
     action_add = action_sub.add_parser("add", help="next action 추가")
     action_add.add_argument("--session", required=True)
     action_add.add_argument("--text", required=True)
-    action_add.add_argument("--status", default="pending")
+    action_add.add_argument("--status", choices=ACTION_STATUSES, default="pending")
     action_add.add_argument("--owner", required=True)
     action_add.set_defaults(func=command_action_add)
+    action_status = action_sub.add_parser("status", help="next action 상태 변경")
+    action_status.add_argument("action")
+    action_status.add_argument("--status", choices=ACTION_STATUSES, required=True)
+    action_status.set_defaults(func=command_action_status)
 
     question = subparsers.add_parser("question", help="open question 관리")
     question_sub = question.add_subparsers(dest="question_command", required=True)
     question_add = question_sub.add_parser("add", help="open question 추가")
     question_add.add_argument("--session", required=True)
     question_add.add_argument("--text", required=True)
-    question_add.add_argument("--status", default="open")
+    question_add.add_argument("--status", choices=QUESTION_STATUSES, default="open")
     question_add.set_defaults(func=command_question_add)
+    question_status = question_sub.add_parser("status", help="open question 상태 변경")
+    question_status.add_argument("question")
+    question_status.add_argument("--status", choices=QUESTION_STATUSES, required=True)
+    question_status.set_defaults(func=command_question_status)
 
     prd = subparsers.add_parser("prd", help="PRD 관리")
     prd_sub = prd.add_subparsers(dest="prd_command", required=True)
@@ -1361,6 +1960,25 @@ def build_parser() -> argparse.ArgumentParser:
     prd_link.set_defaults(func=command_prd_link)
     prd_index = prd_sub.add_parser("index", help="PRD map 재생성")
     prd_index.set_defaults(func=command_prd_index)
+
+    requirement = subparsers.add_parser("requirement", help="PRD requirement 관리")
+    requirement_sub = requirement.add_subparsers(dest="requirement_command", required=True)
+    requirement_add = requirement_sub.add_parser("add", help="requirement 추가")
+    requirement_add.add_argument("--prd", required=True)
+    requirement_add.add_argument("--text", required=True)
+    requirement_add.add_argument("--status", choices=REQUIREMENT_STATUSES, default="proposed")
+    requirement_add.add_argument("--session")
+    requirement_add.add_argument("--turn")
+    requirement_add.set_defaults(func=command_requirement_add)
+    requirement_list = requirement_sub.add_parser("list", help="PRD requirement 목록")
+    requirement_list.add_argument("--prd", required=True)
+    requirement_list.set_defaults(func=command_requirement_list)
+    requirement_status = requirement_sub.add_parser("status", help="requirement 상태 및 provenance 기록")
+    requirement_status.add_argument("requirement")
+    requirement_status.add_argument("--status", choices=REQUIREMENT_STATUSES, required=True)
+    requirement_status.add_argument("--session", required=True)
+    requirement_status.add_argument("--turn", required=True)
+    requirement_status.set_defaults(func=command_requirement_status)
 
     index = subparsers.add_parser("index", help="global index 관리")
     index_sub = index.add_subparsers(dest="index_command", required=True)

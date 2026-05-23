@@ -39,6 +39,11 @@ class ProjectMasterCliTest(unittest.TestCase):
             root = Path(directory)
             self.run_pm(root, "init")
             self.run_pm(root, "init")
+            agent_instructions = (root / ".project-master" / "agent.md").read_text(encoding="utf-8")
+            template = (root / ".project-master" / "prd-spec" / "template.md").read_text(encoding="utf-8")
+            self.assertIn("./pm context brief", agent_instructions)
+            self.assertIn("./pm session finish", agent_instructions)
+            self.assertIn("R-xxx", template)
             result = self.run_pm(root, "session", "new")
             self.assertIn("S-001", result.stdout)
 
@@ -462,6 +467,368 @@ class ProjectMasterCliTest(unittest.TestCase):
             ).read_text(encoding="utf-8")
             for _, item_id in links:
                 self.assertEqual(text.count(item_id), 1)
+
+    def test_context_brief_includes_open_session_source_records(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.run_pm(root, "init")
+            main = root / ".project-master" / "main.md"
+            main.write_text(
+                main.read_text(encoding="utf-8")
+                .replace("TBD. 프로젝트의 목적과 범위를 기록합니다.", "Memory contract.")
+                .replace("TBD. 현재 가장 중요한 작업을 기록합니다.", "Stabilize brief."),
+                encoding="utf-8",
+            )
+            self.run_pm(root, "prd", "new", "--title", "Brief", "--status", "active")
+            self.run_pm(root, "session", "new")
+            self.run_pm(
+                root,
+                "decision",
+                "add",
+                "--session",
+                "S-001",
+                "--title",
+                "Read source records",
+                "--rationale",
+                "open work matters",
+                "--source",
+                "test",
+            )
+            self.run_pm(root, "action", "add", "--session", "S-001", "--text", "Finish", "--owner", "agent")
+            self.run_pm(root, "question", "add", "--session", "S-001", "--text", "Ready?")
+            self.run_pm(
+                root,
+                "requirement",
+                "add",
+                "--prd",
+                "P-001",
+                "--text",
+                "Load active requirement",
+                "--status",
+                "accepted",
+            )
+
+            brief = self.run_pm(root, "context", "brief").stdout
+            self.assertIn("Memory contract.", brief)
+            self.assertIn("- P-001: Brief", brief)
+            self.assertIn("- R-001 (accepted, P-001): Load active requirement", brief)
+            self.assertIn("- A-001: Finish", brief)
+            self.assertIn("- D-001: Read source records", brief)
+            self.assertIn("- Q-001: Ready?", brief)
+            self.assertIn("- structural check: passed", brief)
+            status = self.run_pm(root, "status").stdout
+            self.assertIn("active decisions: 1", status)
+            self.assertIn("pending actions: 1", status)
+
+    def test_session_finish_writes_summary_indexes_and_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.run_pm(root, "init")
+            self.run_pm(root, "session", "new")
+            self.run_pm(
+                root,
+                "decision",
+                "add",
+                "--session",
+                "S-001",
+                "--title",
+                "Finish atomically",
+                "--rationale",
+                "agent reliability",
+                "--source",
+                "test",
+            )
+            summary_path = root / ".project-master" / "sessions" / "S-001" / "summary.md"
+            summary_path.write_text(
+                summary_path.read_text(encoding="utf-8").replace(
+                    "## Key Discussion Points\n\nTBD.",
+                    "## Key Discussion Points\n\nPreserve authored discussion.",
+                ),
+                encoding="utf-8",
+            )
+            result = self.run_pm(
+                root,
+                "session",
+                "finish",
+                "S-001",
+                "--one-line",
+                "Finished work.",
+                "--flow",
+                "Recorded and validated.",
+                "--intent",
+                "Avoid missing closure.",
+                "--next",
+                "Ship.",
+            )
+            self.assertIn("check passed", result.stdout)
+            summary = summary_path.read_text(encoding="utf-8")
+            self.assertIn("- Status: closed", summary)
+            self.assertIn("Finished work.", summary)
+            self.assertIn("- D-001: Finish atomically", summary)
+            self.assertIn("Preserve authored discussion.", summary)
+            self.assertIn("열린 질문 없음.", summary)
+            self.assertIn("| S-001 |", (root / ".project-master" / "index" / "session-map.md").read_text(encoding="utf-8"))
+            self.run_pm(root, "check")
+
+            repeated = self.run_pm(
+                root,
+                "session",
+                "finish",
+                "S-001",
+                "--one-line",
+                "Finished work.",
+                "--flow",
+                "Recorded and validated.",
+                "--intent",
+                "Avoid missing closure.",
+                "--next",
+                "Ship.",
+            )
+            self.assertIn("changelog unchanged", repeated.stdout)
+            changelog = (root / ".project-master" / "index" / "changelog.md").read_text(encoding="utf-8")
+            self.assertEqual(changelog.count("<!-- PM:index-update:S-001 -->"), 1)
+            self.assertIn("Preserve authored discussion.", summary_path.read_text(encoding="utf-8"))
+            closed_source_commands = (
+                ("raw", "append", "--session", "S-001", "--role", "user", "--content", "late"),
+                (
+                    "turn",
+                    "add",
+                    "--session",
+                    "S-001",
+                    "--prompt",
+                    "late",
+                    "--content",
+                    "late",
+                    "--intent",
+                    "late",
+                    "--response",
+                    "late",
+                    "--result",
+                    "late",
+                ),
+                (
+                    "decision",
+                    "add",
+                    "--session",
+                    "S-001",
+                    "--title",
+                    "late",
+                    "--rationale",
+                    "late",
+                    "--source",
+                    "late",
+                ),
+                ("action", "add", "--session", "S-001", "--text", "late", "--owner", "agent"),
+                ("question", "add", "--session", "S-001", "--text", "late"),
+            )
+            for command in closed_source_commands:
+                rejected_source = self.run_pm_failure(root, *command)
+                self.assertIn("closed session", rejected_source.stderr)
+
+            rejected = self.run_pm_failure(
+                root,
+                "session",
+                "finish",
+                "S-001",
+                "--one-line",
+                "",
+                "--flow",
+                "flow",
+                "--intent",
+                "intent",
+                "--next",
+                "next",
+            )
+            self.assertIn("비어 있을 수 없습니다", rejected.stderr)
+
+    def test_session_finish_refuses_invalid_project_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.run_pm(root, "init")
+            self.run_pm(root, "session", "new")
+            (root / ".project-master" / "index" / "decisions.md").unlink()
+            rejected = self.run_pm_failure(
+                root,
+                "session",
+                "finish",
+                "S-001",
+                "--one-line",
+                "Should not write.",
+                "--flow",
+                "invalid",
+                "--intent",
+                "guard",
+                "--next",
+                "repair",
+            )
+            self.assertIn("failed before session finish", rejected.stderr)
+            summary = (root / ".project-master" / "sessions" / "S-001" / "summary.md").read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("- Status: open", summary)
+            self.assertIn("TBD. session", summary)
+
+    def test_requirement_lifecycle_preserves_authored_text_and_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.run_pm(root, "init")
+            self.run_pm(root, "prd", "new", "--title", "Requirement trace", "--status", "active")
+            path = root / ".project-master" / "prd-spec" / "active" / "P-001-requirement-trace.md"
+            path.write_text(path.read_text(encoding="utf-8") + "\nAuthored note remains.\n", encoding="utf-8")
+            self.run_pm(root, "session", "new")
+            self.run_pm(
+                root,
+                "turn",
+                "add",
+                "--session",
+                "S-001",
+                "--prompt",
+                "requirement",
+                "--content",
+                "trace",
+                "--intent",
+                "preserve provenance",
+                "--response",
+                "add",
+                "--result",
+                "R-001",
+            )
+            self.run_pm(
+                root,
+                "requirement",
+                "add",
+                "--prd",
+                "P-001",
+                "--text",
+                "Provide traceability",
+                "--status",
+                "proposed",
+                "--session",
+                "S-001",
+                "--turn",
+                "T-001",
+            )
+            self.run_pm(
+                root,
+                "requirement",
+                "status",
+                "R-001",
+                "--status",
+                "accepted",
+                "--session",
+                "S-001",
+                "--turn",
+                "T-001",
+            )
+            listing = self.run_pm(root, "requirement", "list", "--prd", "P-001").stdout
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("R-001 | accepted | Provide traceability", listing)
+            self.assertIn("Authored note remains.", text)
+            self.assertIn("- Status: accepted", text)
+            self.assertIn("status=proposed", text)
+            self.assertIn("status=accepted", text)
+            self.assertIn("- Source Sessions: S-001", text)
+            self.assertIn("- Source Turns: T-001", text)
+            self.run_pm(root, "check")
+
+            text = path.read_text(encoding="utf-8").replace("- Last Source Turn: T-001", "- Last Source Turn: T-999")
+            path.write_text(text, encoding="utf-8")
+            invalid = self.run_pm_failure(root, "check")
+            self.assertIn("invalid requirement source in R-001", invalid.stderr)
+
+    def test_requirement_allocator_reserves_authored_requirement_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.run_pm(root, "init")
+            self.run_pm(root, "prd", "new", "--title", "Legacy IDs")
+            path = root / ".project-master" / "prd-spec" / "backlog" / "P-001-legacy-ids.md"
+            path.write_text(
+                path.read_text(encoding="utf-8") + "\n- R-004 (accepted): authored before CLI support.\n",
+                encoding="utf-8",
+            )
+            created = self.run_pm(
+                root,
+                "requirement",
+                "add",
+                "--prd",
+                "P-001",
+                "--text",
+                "Managed later",
+            ).stdout
+            self.assertIn("R-005", created)
+            self.run_pm(root, "check")
+
+    def test_record_status_commands_update_source_and_index(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.run_pm(root, "init")
+            self.run_pm(root, "session", "new")
+            for title in ("Original", "Replacement"):
+                self.run_pm(
+                    root,
+                    "decision",
+                    "add",
+                    "--session",
+                    "S-001",
+                    "--title",
+                    title,
+                    "--rationale",
+                    "test",
+                    "--source",
+                    "test",
+                )
+            self.run_pm(root, "action", "add", "--session", "S-001", "--text", "Work", "--owner", "agent")
+            self.run_pm(root, "question", "add", "--session", "S-001", "--text", "Question")
+            self.run_pm(root, "decision", "status", "D-001", "--status", "superseded", "--by", "D-002")
+            self.run_pm(root, "action", "status", "A-001", "--status", "done")
+            self.run_pm(root, "question", "status", "Q-001", "--status", "resolved")
+
+            decision = (root / ".project-master" / "index" / "decisions.md").read_text(encoding="utf-8")
+            action = (root / ".project-master" / "index" / "next-actions.md").read_text(encoding="utf-8")
+            question = (root / ".project-master" / "index" / "open-questions.md").read_text(encoding="utf-8")
+            self.assertIn("- Status: superseded", decision)
+            self.assertIn("- Superseded by: D-002", decision)
+            self.assertIn("- Status: done", action)
+            self.assertIn("- Status: resolved", question)
+            brief = self.run_pm(root, "context", "brief").stdout
+            self.assertNotIn("- A-001: Work", brief)
+            self.assertNotIn("- Q-001: Question", brief)
+            self.assertNotIn("- D-001: Original", brief)
+            self.assertIn("- D-002: Replacement", brief)
+            self.run_pm(root, "check")
+
+    def test_concurrent_requirement_adds_assign_unique_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.run_pm(root, "init")
+            self.run_pm(root, "prd", "new", "--title", "Concurrent requirements")
+            attempts = 8
+
+            def add(number: int) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [
+                        sys.executable,
+                        str(PM),
+                        "requirement",
+                        "add",
+                        "--prd",
+                        "P-001",
+                        "--text",
+                        f"Requirement {number}",
+                    ],
+                    cwd=root,
+                    text=True,
+                    capture_output=True,
+                )
+
+            with ThreadPoolExecutor(max_workers=attempts) as executor:
+                results = list(executor.map(add, range(attempts)))
+            for result in results:
+                self.assertEqual(result.returncode, 0, result.stderr)
+            listing = self.run_pm(root, "requirement", "list", "--prd", "P-001").stdout
+            for number in range(1, attempts + 1):
+                self.assertIn(f"R-{number:03d}", listing)
+            self.run_pm(root, "check")
 
 
 if __name__ == "__main__":

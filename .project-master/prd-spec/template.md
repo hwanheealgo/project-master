@@ -31,7 +31,7 @@
 
 ## Requirements
 
-중요한 요구사항에는 선택적으로 안정적인 ID(`R-001`)와 상태(`proposed`, `accepted`, `deferred`, `removed`, `rolled_back`)를 기록합니다.
+중요한 요구사항은 CLI가 안정적인 ID(`R-xxx`)와 상태 이력을 관리합니다.
 
 ## Functional Requirements
 
