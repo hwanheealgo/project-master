@@ -578,12 +578,13 @@ def command_session_new(_: argparse.Namespace) -> int:
     root = project_root()
     if not require_initialized(root):
         return 1
-    session_id = next_id(root, "S")
-    session_dir = root / "sessions" / session_id
-    session_dir.mkdir(parents=True)
-    for name, content in session_templates(session_id).items():
-        (session_dir / name).write_text(content, encoding="utf-8")
-    session_map_update(root, session_id, "open")
+    with project_lock(root):
+        session_id = next_id(root, "S")
+        session_dir = root / "sessions" / session_id
+        session_dir.mkdir(parents=True)
+        for name, content in session_templates(session_id).items():
+            (session_dir / name).write_text(content, encoding="utf-8")
+        session_map_update(root, session_id, "open")
     print(session_id)
     return 0
 
@@ -676,17 +677,18 @@ def command_turn_add(args: argparse.Namespace) -> int:
     root = project_root()
     if not require_initialized(root):
         return 1
-    session_dir = validate_session(root, args.session)
-    if not session_dir:
-        return 1
-    item_id = next_id(root, "T")
-    body = f"## {item_id}\n\n"
-    body += markdown_field("User prompt", args.prompt)
-    body += markdown_field("Content", args.content)
-    body += markdown_field("User intent", args.intent)
-    body += markdown_field("Assistant response summary", args.response)
-    body += markdown_field("Resulting state change", args.result)
-    append_text(session_dir / "turns.md", managed_block("turn", item_id, body))
+    with project_lock(root):
+        session_dir = validate_session(root, args.session)
+        if not session_dir:
+            return 1
+        item_id = next_id(root, "T")
+        body = f"## {item_id}\n\n"
+        body += markdown_field("User prompt", args.prompt)
+        body += markdown_field("Content", args.content)
+        body += markdown_field("User intent", args.intent)
+        body += markdown_field("Assistant response summary", args.response)
+        body += markdown_field("Resulting state change", args.result)
+        append_text(session_dir / "turns.md", managed_block("turn", item_id, body))
     print(item_id)
     return 0
 
@@ -695,20 +697,21 @@ def command_decision_add(args: argparse.Namespace) -> int:
     root = project_root()
     if not require_initialized(root):
         return 1
-    session_dir = validate_session(root, args.session)
-    if not session_dir:
-        return 1
-    item_id = next_id(root, "D")
-    body = f"## {item_id}: {args.title.strip()}\n\n"
-    body += markdown_field("Status", args.status)
-    body += markdown_field("Source Session", args.session)
-    body += markdown_field("Date", today())
-    body += markdown_field("Rationale", args.rationale)
-    body += markdown_field("Decision", args.title)
-    body += markdown_field("Source Detail", args.source)
-    body += markdown_field("Supersedes", "")
-    body += markdown_field("Superseded by", "")
-    append_text(session_dir / "decisions.md", managed_block("decision", item_id, body))
+    with project_lock(root):
+        session_dir = validate_session(root, args.session)
+        if not session_dir:
+            return 1
+        item_id = next_id(root, "D")
+        body = f"## {item_id}: {args.title.strip()}\n\n"
+        body += markdown_field("Status", args.status)
+        body += markdown_field("Source Session", args.session)
+        body += markdown_field("Date", today())
+        body += markdown_field("Rationale", args.rationale)
+        body += markdown_field("Decision", args.title)
+        body += markdown_field("Source Detail", args.source)
+        body += markdown_field("Supersedes", "")
+        body += markdown_field("Superseded by", "")
+        append_text(session_dir / "decisions.md", managed_block("decision", item_id, body))
     print(item_id)
     return 0
 
@@ -717,18 +720,19 @@ def command_action_add(args: argparse.Namespace) -> int:
     root = project_root()
     if not require_initialized(root):
         return 1
-    session_dir = validate_session(root, args.session)
-    if not session_dir:
-        return 1
-    item_id = next_id(root, "A")
-    body = f"## {item_id}\n\n"
-    body += markdown_field("Status", args.status)
-    body += markdown_field("Source Session", args.session)
-    body += markdown_field("Owner", args.owner)
-    body += markdown_field("Action", args.text)
-    body += markdown_field("Created", today())
-    body += markdown_field("Updated", today())
-    append_text(session_dir / "actions.md", managed_block("action", item_id, body))
+    with project_lock(root):
+        session_dir = validate_session(root, args.session)
+        if not session_dir:
+            return 1
+        item_id = next_id(root, "A")
+        body = f"## {item_id}\n\n"
+        body += markdown_field("Status", args.status)
+        body += markdown_field("Source Session", args.session)
+        body += markdown_field("Owner", args.owner)
+        body += markdown_field("Action", args.text)
+        body += markdown_field("Created", today())
+        body += markdown_field("Updated", today())
+        append_text(session_dir / "actions.md", managed_block("action", item_id, body))
     print(item_id)
     return 0
 
@@ -737,16 +741,17 @@ def command_question_add(args: argparse.Namespace) -> int:
     root = project_root()
     if not require_initialized(root):
         return 1
-    session_dir = validate_session(root, args.session)
-    if not session_dir:
-        return 1
-    item_id = next_id(root, "Q")
-    body = f"## {item_id}\n\n"
-    body += markdown_field("Status", args.status)
-    body += markdown_field("Source Session", args.session)
-    body += markdown_field("Question", args.text)
-    body += markdown_field("Created", today())
-    append_text(session_dir / "open-questions.md", managed_block("question", item_id, body))
+    with project_lock(root):
+        session_dir = validate_session(root, args.session)
+        if not session_dir:
+            return 1
+        item_id = next_id(root, "Q")
+        body = f"## {item_id}\n\n"
+        body += markdown_field("Status", args.status)
+        body += markdown_field("Source Session", args.session)
+        body += markdown_field("Question", args.text)
+        body += markdown_field("Created", today())
+        append_text(session_dir / "open-questions.md", managed_block("question", item_id, body))
     print(item_id)
     return 0
 

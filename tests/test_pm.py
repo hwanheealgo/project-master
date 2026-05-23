@@ -146,6 +146,13 @@ class ProjectMasterCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("missing file: index/decisions.md", result.stderr)
 
+    def test_checkout_retains_required_empty_prd_status_directories(self) -> None:
+        repository_root = PM.parent
+        for status in ("active", "backlog", "cancelled"):
+            keep = repository_root / ".project-master" / "prd-spec" / status / ".gitkeep"
+            self.assertTrue(keep.is_file(), f"missing tracked status placeholder: {keep}")
+        self.run_pm(repository_root, "check")
+
     def test_prd_lifecycle_links_and_idempotent_map(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -302,6 +309,85 @@ class ProjectMasterCliTest(unittest.TestCase):
             result = self.run_pm_failure(root, "check")
             self.assertIn("invalid PRD location", result.stderr)
             self.assertIn("stale PRD map managed block", result.stderr)
+
+    def test_concurrent_session_and_record_creation_assigns_unique_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.run_pm(root, "init")
+            attempts = 12
+
+            def run(command: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [sys.executable, str(PM), *command],
+                    cwd=root,
+                    text=True,
+                    capture_output=True,
+                )
+
+            def run_parallel(commands: list[tuple[str, ...]]) -> set[str]:
+                with ThreadPoolExecutor(max_workers=attempts) as executor:
+                    results = list(executor.map(run, commands))
+                for result in results:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                return {result.stdout.strip() for result in results}
+
+            session_ids = run_parallel([("session", "new")] * attempts)
+            self.assertEqual({f"S-{number:03d}" for number in range(1, attempts + 1)}, session_ids)
+
+            commands = {
+                "T": (
+                    "turn",
+                    "add",
+                    "--session",
+                    "S-001",
+                    "--prompt",
+                    "parallel",
+                    "--content",
+                    "records",
+                    "--intent",
+                    "locking",
+                    "--response",
+                    "stored",
+                    "--result",
+                    "unique",
+                ),
+                "D": (
+                    "decision",
+                    "add",
+                    "--session",
+                    "S-001",
+                    "--title",
+                    "Parallel decision",
+                    "--rationale",
+                    "locking",
+                    "--source",
+                    "test",
+                ),
+                "A": (
+                    "action",
+                    "add",
+                    "--session",
+                    "S-001",
+                    "--text",
+                    "Parallel action",
+                    "--owner",
+                    "agent",
+                ),
+                "Q": (
+                    "question",
+                    "add",
+                    "--session",
+                    "S-001",
+                    "--text",
+                    "Parallel question?",
+                ),
+            }
+            for prefix, command in commands.items():
+                item_ids = run_parallel([command] * attempts)
+                expected = {f"{prefix}-{number:03d}" for number in range(1, attempts + 1)}
+                self.assertEqual(expected, item_ids)
+
+            self.run_pm(root, "check")
 
     def test_concurrent_prd_links_preserve_all_relations(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
